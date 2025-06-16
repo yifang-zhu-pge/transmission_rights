@@ -34,22 +34,25 @@ if os.path.exists('outputs') == False:
 project_information = pd.read_csv(os.path.join('inputs','project_info.csv'),index_col='project')
 ltf_rights = pd.read_csv(os.path.join('inputs','Utility_LTF_rights.csv'))
 ptdfs = pd.read_csv(os.path.join('inputs','PTDFs.csv'))
+# The list of flowgates
 path_list = list(np.unique(ptdfs['Path']))
 
+# The list of flowgates with historical flow data
 path_list_with_data = []
 flow_data = []
 path_allocation_factors = []
 for path in path_list:
-    
+    # If the path has historical flow data
     if os.path.exists(os.path.join('inputs','historical_flows',path+'.csv')):
         
         path_list_with_data.append(path)
-    
+        # Read historical flow data
         flow_data_tmp = pd.read_csv(os.path.join('inputs','historical_flows',path+'.csv'))
         
         # calculate the maximum flow as the minimum of the TTC and SOL
         flow_data_tmp['TTC'].fillna(999999,inplace=True)
         flow_data_tmp['SOL'].fillna(999999,inplace=True)
+        # Instead of doing a interpolation, Elaine filled the missing actual flow with 999999, which will definitely cause a congestion.
         flow_data_tmp['actual flow'].fillna(999999,inplace=True)
         flow_data_tmp['min(TTC,SOL)'] = np.minimum(flow_data_tmp['TTC'],flow_data_tmp['SOL'])
         
@@ -57,8 +60,11 @@ for path in path_list:
         TTC_average = np.mean(flow_data_tmp['min(TTC,SOL)'])
         
         # calculate utility path allocation factor (capping between 0 and 1)
+        # path allocation factor here means how much of a path's capacity is effectively reserved for the utility's use
         path_allocation_factor_tmp = 0
-        for index, row in ltf_rights.iterrows():     
+        # sum(PTDF * LTF rights / TTC)
+        for _, row in ltf_rights.iterrows():
+            # Find the flowgate, POR, POD
             path_allocation_factor_tmp += ptdfs[(ptdfs['Path'] == path) & (ptdfs['POR']==row['POR']) & (ptdfs['POD']==row['POD'])]['PTDF'].iloc[0]*row['LTF rights (MW)']/TTC_average
         path_allocation_factors.append(max(min(path_allocation_factor_tmp,1),0))
         
@@ -66,12 +72,14 @@ for path in path_list:
         flow_data_tmp['headroom'] = flow_data_tmp['min(TTC,SOL)'] - flow_data_tmp['actual flow']
         
         # exclude timepoints for which TTC and SOL or actual flow data is unavailable
+        # Elaine's approach is differnt from mine. She didn't do an interpolation here
         flow_data_tmp = flow_data_tmp[(flow_data_tmp['min(TTC,SOL)'] != 999999) & (flow_data_tmp['min(TTC,SOL)'] != 0) & (flow_data_tmp['actual flow'] != 999999) & (flow_data_tmp['actual flow'] != 0)]
         flow_data.append(flow_data_tmp)
     
 # Estimate impacts of delivering output to POD on flows across each path based on PTDFs
 project_info = project_information.loc[project]
 project_hourly_data = pd.read_csv(os.path.join('inputs','project_hourly_data',project_info['Hourly data']))
+# "deliverable output" here means the output that is not at risk
 project_hourly_data['deliverable output (MW)'] = np.minimum(project_hourly_data['total output (MW)'],project_hourly_data['available LTF tx (MW)'])
 project_hourly_data['output at risk (MW)'] = project_hourly_data['total output (MW)'] - project_hourly_data['deliverable output (MW)']
 
